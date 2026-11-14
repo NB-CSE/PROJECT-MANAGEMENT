@@ -1,0 +1,32 @@
+image: node:20
+
+stages:
+  - install
+  - test
+  - build
+
+cache:
+  paths:
+    - backend/node_modules/
+    - frontend/node_modules/
+
+install_dependencies:
+  stage: install
+  script:
+    - npm install --prefix backend
+    - npm install --prefix frontend
+
+test_and_lint:
+  stage: test
+  script:
+    - node -c backend/src/server.js
+    - echo "Backend syntax check verified successfully."
+
+build_frontend:
+  stage: build
+  script:
+    - npm run build --prefix frontend
+  artifacts:
+    paths:
+      - frontend/dist/
+    expire_in: 1 week
