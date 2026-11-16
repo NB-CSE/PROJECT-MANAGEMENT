@@ -1,85 +1,74 @@
 const Task = require('../models/Task');
 const Project = require('../models/Project');
 const Activity = require('../models/Activity');
+const store = require('../config/inMemoryStore');
+const { getDbStatus } = require('../config/db');
 
-// Helper to check user project access
-const checkProjectAccess = async (projectId, userId) => {
-  const project = await Project.findById(projectId);
-  if (!project) return null;
-  const isOwner = project.ownerId.toString() === userId.toString();
-  const isMember = project.memberIds.some((id) => id.toString() === userId.toString());
-  return { project, hasAccess: isOwner || isMember, isOwner };
-};
-
-// @desc    Get tasks
+// @desc    Get tasks with filters
 // @route   GET /api/tasks
 // @access  Private
 const getTasks = async (req, res, next) => {
   try {
-    const { projectId, assignedTo, priority, status, search, overdue } = req.query;
-    const userId = req.user._id;
+    const { projectId, status, priority, assignedTo, search } = req.query;
 
-    let query = {};
+    if (getDbStatus()) {
+      let query = {};
 
-    if (projectId) {
-      const access = await checkProjectAccess(projectId, userId);
-      if (!access) {
-        return res.status(404).json({ success: false, message: 'Project not found' });
+      if (projectId) {
+        query.projectId = projectId;
       }
-      if (!access.hasAccess) {
-        return res.status(403).json({ success: false, message: 'Not authorized for this project' });
+
+      if (status && status !== 'All') {
+        query.status = status;
       }
-      query.projectId = projectId;
+
+      if (priority && priority !== 'All') {
+        query.priority = priority;
+      }
+
+      if (assignedTo) {
+        if (assignedTo === 'me') {
+          query.assignedTo = req.user._id;
+        } else if (assignedTo === 'unassigned') {
+          query.assignedTo = null;
+        } else {
+          query.assignedTo = assignedTo;
+        }
+      }
+
+      if (search) {
+        query.$or = [
+          { title: { $regex: search, $options: 'i' } },
+          { description: { $regex: search, $options: 'i' } }
+        ];
+      }
+
+      const tasks = await Task.find(query)
+        .populate('assignedTo', 'name email')
+        .populate('createdBy', 'name email')
+        .populate('projectId', 'name')
+        .sort({ createdAt: -1 });
+
+      return res.status(200).json({
+        success: true,
+        count: tasks.length,
+        tasks
+      });
     } else {
-      // Find all projects user has access to
-      const userProjects = await Project.find({
-        $or: [{ ownerId: userId }, { memberIds: userId }]
-      }).select('_id');
-      const projectIds = userProjects.map((p) => p._id);
-      query.projectId = { $in: projectIds };
+      const tasks = store.findTasks({
+        projectId,
+        status,
+        priority,
+        assignedTo,
+        search,
+        userId: req.user._id
+      });
+      return res.status(200).json({
+        success: true,
+        count: tasks.length,
+        tasks
+      });
     }
-
-    if (assignedTo) {
-      if (assignedTo === 'me') {
-        query.assignedTo = userId;
-      } else if (assignedTo === 'unassigned') {
-        query.assignedTo = null;
-      } else {
-        query.assignedTo = assignedTo;
-      }
-    }
-
-    if (priority && priority !== 'All') {
-      query.priority = priority;
-    }
-
-    if (status && status !== 'All') {
-      query.status = status;
-    }
-
-    if (search) {
-      query.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    if (overdue === 'true') {
-      query.dueDate = { $lt: new Date() };
-      query.status = { $ne: 'Completed' };
-    }
-
-    const tasks = await Task.find(query)
-      .populate('assignedTo', 'name email role')
-      .populate('createdBy', 'name email')
-      .populate('projectId', 'name status')
-      .sort({ dueDate: 1, createdAt: -1 });
-
-    res.status(200).json({
-      success: true,
-      count: tasks.length,
-      tasks
-    });
   } catch (error) {
     next(error);
   }
@@ -90,36 +79,30 @@ const getTasks = async (req, res, next) => {
 // @access  Private
 const getTaskById = async (req, res, next) => {
   try {
-    const task = await Task.findById(req.params.id)
-      .populate('assignedTo', 'name email role')
-      .populate('createdBy', 'name email')
-      .populate('projectId', 'name status ownerId memberIds');
+    if (getDbStatus()) {
+      const task = await Task.findById(req.params.id)
+        .populate('assignedTo', 'name email')
+        .populate('createdBy', 'name email')
+        .populate('projectId', 'name');
 
-    if (!task) {
-      return res.status(404).json({
-        success: false,
-        message: 'Task not found'
-      });
+      if (!task) {
+        return res.status(404).json({ success: false, message: 'Task not found' });
+      }
+
+      return res.status(200).json({ success: true, task });
+    } else {
+      const task = store.findTaskById(req.params.id);
+      if (!task) {
+        return res.status(404).json({ success: false, message: 'Task not found' });
+      }
+      return res.status(200).json({ success: true, task });
     }
-
-    const access = await checkProjectAccess(task.projectId._id, req.user._id);
-    if (!access || !access.hasAccess) {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized to view this task'
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      task
-    });
   } catch (error) {
     next(error);
   }
 };
 
-// @desc    Create new task
+// @desc    Create a new task
 // @route   POST /api/tasks
 // @access  Private
 const createTask = async (req, res, next) => {
@@ -129,19 +112,11 @@ const createTask = async (req, res, next) => {
     if (!title || !projectId) {
       return res.status(400).json({
         success: false,
-        message: 'Title and projectId are required'
+        message: 'Task title and project ID are required'
       });
     }
 
-    const access = await checkProjectAccess(projectId, req.user._id);
-    if (!access) {
-      return res.status(404).json({ success: false, message: 'Project not found' });
-    }
-    if (!access.hasAccess) {
-      return res.status(403).json({ success: false, message: 'Not authorized for this project' });
-    }
-
-    const task = await Task.create({
+    const taskData = {
       title,
       description: description || '',
       projectId,
@@ -150,25 +125,36 @@ const createTask = async (req, res, next) => {
       priority: priority || 'Medium',
       status: status || 'To Do',
       dueDate: dueDate || null
-    });
+    };
 
-    await Activity.create({
-      projectId,
-      taskId: task._id,
-      userId: req.user._id,
-      action: `Created task "${task.title}"`
-    });
+    if (getDbStatus()) {
+      const task = await Task.create(taskData);
+      await Activity.create({
+        projectId: task.projectId,
+        taskId: task._id,
+        userId: req.user._id,
+        action: `Created task "${task.title}"`
+      });
 
-    const populatedTask = await Task.findById(task._id)
-      .populate('assignedTo', 'name email role')
-      .populate('createdBy', 'name email')
-      .populate('projectId', 'name status');
+      const populatedTask = await Task.findById(task._id)
+        .populate('assignedTo', 'name email')
+        .populate('createdBy', 'name email')
+        .populate('projectId', 'name');
 
-    res.status(201).json({
-      success: true,
-      message: 'Task created successfully',
-      task: populatedTask
-    });
+      return res.status(201).json({
+        success: true,
+        message: 'Task created successfully',
+        task: populatedTask
+      });
+    } else {
+      const task = store.createTask(taskData);
+      const populated = store.findTaskById(task._id);
+      return res.status(201).json({
+        success: true,
+        message: 'Task created successfully',
+        task: populated
+      });
+    }
   } catch (error) {
     next(error);
   }
@@ -179,100 +165,81 @@ const createTask = async (req, res, next) => {
 // @access  Private
 const updateTask = async (req, res, next) => {
   try {
-    const task = await Task.findById(req.params.id);
+    if (getDbStatus()) {
+      let task = await Task.findById(req.params.id);
+      if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
 
-    if (!task) {
-      return res.status(404).json({ success: false, message: 'Task not found' });
+      Object.assign(task, req.body);
+      await task.save();
+
+      const populatedTask = await Task.findById(task._id)
+        .populate('assignedTo', 'name email')
+        .populate('createdBy', 'name email')
+        .populate('projectId', 'name');
+
+      return res.status(200).json({
+        success: true,
+        message: 'Task updated successfully',
+        task: populatedTask
+      });
+    } else {
+      const updated = store.updateTask(req.params.id, req.body);
+      if (!updated) return res.status(404).json({ success: false, message: 'Task not found' });
+      const populated = store.findTaskById(req.params.id);
+      return res.status(200).json({
+        success: true,
+        message: 'Task updated successfully',
+        task: populated
+      });
     }
-
-    const access = await checkProjectAccess(task.projectId, req.user._id);
-    if (!access || !access.hasAccess) {
-      return res.status(403).json({ success: false, message: 'Not authorized for this project' });
-    }
-
-    const { title, description, assignedTo, priority, status, dueDate } = req.body;
-    const oldStatus = task.status;
-
-    if (title) task.title = title;
-    if (description !== undefined) task.description = description;
-    if (assignedTo !== undefined) task.assignedTo = assignedTo || null;
-    if (priority) task.priority = priority;
-    if (status) task.status = status;
-    if (dueDate !== undefined) task.dueDate = dueDate || null;
-
-    await task.save();
-
-    let activityAction = `Updated task "${task.title}"`;
-    if (status && status !== oldStatus) {
-      activityAction = `Moved "${task.title}" from ${oldStatus} to ${status}`;
-    }
-
-    await Activity.create({
-      projectId: task.projectId,
-      taskId: task._id,
-      userId: req.user._id,
-      action: activityAction
-    });
-
-    const populatedTask = await Task.findById(task._id)
-      .populate('assignedTo', 'name email role')
-      .populate('createdBy', 'name email')
-      .populate('projectId', 'name status');
-
-    res.status(200).json({
-      success: true,
-      message: 'Task updated successfully',
-      task: populatedTask
-    });
   } catch (error) {
     next(error);
   }
 };
 
-// @desc    Update task status only (for Kanban board quick drag/drop)
+// @desc    Quick status change (Kanban drag-and-drop)
 // @route   PATCH /api/tasks/:id/status
 // @access  Private
 const updateTaskStatus = async (req, res, next) => {
   try {
     const { status } = req.body;
-    if (!status || !['To Do', 'In Progress', 'Review', 'Completed'].includes(status)) {
+    const validStatuses = ['To Do', 'In Progress', 'Review', 'Completed'];
+
+    if (!validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid status value. Must be To Do, In Progress, Review, or Completed'
+        message: 'Invalid status value'
       });
     }
 
-    const task = await Task.findById(req.params.id);
-    if (!task) {
-      return res.status(404).json({ success: false, message: 'Task not found' });
+    if (getDbStatus()) {
+      const task = await Task.findById(req.params.id);
+      if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
+
+      task.status = status;
+      await task.save();
+
+      await Activity.create({
+        projectId: task.projectId,
+        taskId: task._id,
+        userId: req.user._id,
+        action: `Moved "${task.title}" to ${status}`
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: `Task moved to ${status}`,
+        task
+      });
+    } else {
+      const updated = store.updateTask(req.params.id, { status });
+      if (!updated) return res.status(404).json({ success: false, message: 'Task not found' });
+      return res.status(200).json({
+        success: true,
+        message: `Task moved to ${status}`,
+        task: updated
+      });
     }
-
-    const access = await checkProjectAccess(task.projectId, req.user._id);
-    if (!access || !access.hasAccess) {
-      return res.status(403).json({ success: false, message: 'Not authorized for this project' });
-    }
-
-    const oldStatus = task.status;
-    task.status = status;
-    await task.save();
-
-    await Activity.create({
-      projectId: task.projectId,
-      taskId: task._id,
-      userId: req.user._id,
-      action: `Moved "${task.title}" from ${oldStatus} to ${status}`
-    });
-
-    const populatedTask = await Task.findById(task._id)
-      .populate('assignedTo', 'name email role')
-      .populate('createdBy', 'name email')
-      .populate('projectId', 'name status');
-
-    res.status(200).json({
-      success: true,
-      message: `Status updated to ${status}`,
-      task: populatedTask
-    });
   } catch (error) {
     next(error);
   }
@@ -283,29 +250,24 @@ const updateTaskStatus = async (req, res, next) => {
 // @access  Private
 const deleteTask = async (req, res, next) => {
   try {
-    const task = await Task.findById(req.params.id);
+    if (getDbStatus()) {
+      const task = await Task.findById(req.params.id);
+      if (!task) return res.status(404).json({ success: false, message: 'Task not found' });
 
-    if (!task) {
-      return res.status(404).json({ success: false, message: 'Task not found' });
+      await Activity.deleteMany({ taskId: task._id });
+      await task.deleteOne();
+
+      return res.status(200).json({
+        success: true,
+        message: 'Task deleted successfully'
+      });
+    } else {
+      store.deleteTask(req.params.id);
+      return res.status(200).json({
+        success: true,
+        message: 'Task deleted successfully'
+      });
     }
-
-    const access = await checkProjectAccess(task.projectId, req.user._id);
-    if (!access || !access.hasAccess) {
-      return res.status(403).json({ success: false, message: 'Not authorized for this project' });
-    }
-
-    await Activity.create({
-      projectId: task.projectId,
-      userId: req.user._id,
-      action: `Deleted task "${task.title}"`
-    });
-
-    await Task.findByIdAndDelete(task._id);
-
-    res.status(200).json({
-      success: true,
-      message: 'Task removed successfully'
-    });
   } catch (error) {
     next(error);
   }

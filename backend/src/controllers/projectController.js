@@ -2,14 +2,8 @@ const Project = require('../models/Project');
 const Task = require('../models/Task');
 const Activity = require('../models/Activity');
 const User = require('../models/User');
-
-// Helper to calculate progress
-const calculateProgress = async (projectId) => {
-  const totalTasks = await Task.countDocuments({ projectId });
-  if (totalTasks === 0) return 0;
-  const completedTasks = await Task.countDocuments({ projectId, status: 'Completed' });
-  return Math.round((completedTasks / totalTasks) * 100);
-};
+const store = require('../config/inMemoryStore');
+const { getDbStatus } = require('../config/db');
 
 // @desc    Get all projects for current user (as owner or member)
 // @route   GET /api/projects
@@ -19,175 +13,162 @@ const getProjects = async (req, res, next) => {
     const { search, status } = req.query;
     const userId = req.user._id;
 
-    let query = {
-      $or: [{ ownerId: userId }, { memberIds: userId }]
-    };
+    if (getDbStatus()) {
+      let query = {
+        $or: [{ ownerId: userId }, { memberIds: userId }]
+      };
 
-    if (status && status !== 'All') {
-      query.status = status;
+      if (status && status !== 'All') {
+        query.status = status;
+      }
+
+      if (search) {
+        query.name = { $regex: search, $options: 'i' };
+      }
+
+      const projects = await Project.find(query)
+        .populate('ownerId', 'name email')
+        .populate('memberIds', 'name email')
+        .sort({ createdAt: -1 });
+
+      const projectsWithStats = await Promise.all(
+        projects.map(async (project) => {
+          const totalTasks = await Task.countDocuments({ projectId: project._id });
+          const completedTasks = await Task.countDocuments({
+            projectId: project._id,
+            status: 'Completed'
+          });
+          const inProgressTasks = await Task.countDocuments({
+            projectId: project._id,
+            status: 'In Progress'
+          });
+          const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+          return {
+            ...project.toObject(),
+            totalTasks,
+            completedTasks,
+            inProgressTasks,
+            progress
+          };
+        })
+      );
+
+      return res.status(200).json({
+        success: true,
+        count: projectsWithStats.length,
+        projects: projectsWithStats
+      });
+    } else {
+      const projects = store.findProjectsForUser(userId, { search, status });
+      return res.status(200).json({
+        success: true,
+        count: projects.length,
+        projects
+      });
     }
-
-    if (search) {
-      query.name = { $regex: search, $options: 'i' };
-    }
-
-    const projects = await Project.find(query)
-      .populate('ownerId', 'name email')
-      .populate('memberIds', 'name email')
-      .sort({ createdAt: -1 });
-
-    // Calculate dynamic stats for each project
-    const projectsWithStats = await Promise.all(
-      projects.map(async (project) => {
-        const totalTasks = await Task.countDocuments({ projectId: project._id });
-        const completedTasks = await Task.countDocuments({
-          projectId: project._id,
-          status: 'Completed'
-        });
-        const inProgressTasks = await Task.countDocuments({
-          projectId: project._id,
-          status: 'In Progress'
-        });
-        const overdueTasks = await Task.countDocuments({
-          projectId: project._id,
-          status: { $ne: 'Completed' },
-          dueDate: { $lt: new Date() }
-        });
-        const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
-
-        return {
-          ...project.toObject(),
-          totalTasks,
-          completedTasks,
-          inProgressTasks,
-          overdueTasks,
-          progress
-        };
-      })
-    );
-
-    res.status(200).json({
-      success: true,
-      count: projectsWithStats.length,
-      projects: projectsWithStats
-    });
   } catch (error) {
     next(error);
   }
 };
 
-// @desc    Get single project by ID
+// @desc    Get single project by ID with members & task stats
 // @route   GET /api/projects/:id
 // @access  Private
 const getProjectById = async (req, res, next) => {
   try {
-    const project = await Project.findById(req.params.id)
-      .populate('ownerId', 'name email')
-      .populate('memberIds', 'name email');
+    if (getDbStatus()) {
+      const project = await Project.findById(req.params.id)
+        .populate('ownerId', 'name email')
+        .populate('memberIds', 'name email');
 
-    if (!project) {
-      return res.status(404).json({
-        success: false,
-        message: 'Project not found'
-      });
-    }
-
-    // Check authorization: must be owner or member
-    const isOwner = project.ownerId._id.toString() === req.user._id.toString();
-    const isMember = project.memberIds.some(
-      (m) => m._id.toString() === req.user._id.toString()
-    );
-
-    if (!isOwner && !isMember) {
-      return res.status(403).json({
-        success: false,
-        message: 'You are not authorized to view this project'
-      });
-    }
-
-    const totalTasks = await Task.countDocuments({ projectId: project._id });
-    const completedTasks = await Task.countDocuments({
-      projectId: project._id,
-      status: 'Completed'
-    });
-    const inProgressTasks = await Task.countDocuments({
-      projectId: project._id,
-      status: 'In Progress'
-    });
-    const overdueTasks = await Task.countDocuments({
-      projectId: project._id,
-      status: { $ne: 'Completed' },
-      dueDate: { $lt: new Date() }
-    });
-    const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
-
-    res.status(200).json({
-      success: true,
-      project: {
-        ...project.toObject(),
-        totalTasks,
-        completedTasks,
-        inProgressTasks,
-        overdueTasks,
-        progress,
-        isOwner
+      if (!project) {
+        return res.status(404).json({ success: false, message: 'Project not found' });
       }
-    });
+
+      const totalTasks = await Task.countDocuments({ projectId: project._id });
+      const completedTasks = await Task.countDocuments({ projectId: project._id, status: 'Completed' });
+      const inProgressTasks = await Task.countDocuments({ projectId: project._id, status: 'In Progress' });
+      const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+      return res.status(200).json({
+        success: true,
+        project: {
+          ...project.toObject(),
+          totalTasks,
+          completedTasks,
+          inProgressTasks,
+          progress
+        }
+      });
+    } else {
+      const project = store.findProjectById(req.params.id);
+      if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+      return res.status(200).json({ success: true, project });
+    }
   } catch (error) {
     next(error);
   }
 };
 
-// @desc    Create new project
+// @desc    Create a new project
 // @route   POST /api/projects
 // @access  Private
 const createProject = async (req, res, next) => {
   try {
-    const { name, description, startDate, deadline, status, memberIds } = req.body;
+    const { name, description, startDate, deadline, status, category, githubUrl, liveUrl, techStack } = req.body;
 
     if (!name) {
-      return res.status(400).json({
-        success: false,
-        message: 'Project name is required'
-      });
+      return res.status(400).json({ success: false, message: 'Project name is required' });
     }
 
-    const members = Array.isArray(memberIds) ? memberIds : [];
-    if (!members.includes(req.user._id.toString())) {
-      members.push(req.user._id);
-    }
-
-    const project = await Project.create({
+    const projectData = {
       name,
-      description,
+      description: description || '',
       ownerId: req.user._id,
-      memberIds: members,
+      memberIds: [req.user._id],
       startDate: startDate || new Date(),
       deadline: deadline || null,
-      status: status || 'Active'
-    });
+      status: status || 'Active',
+      category: category || 'Web Application',
+      githubUrl: githubUrl || '',
+      liveUrl: liveUrl || '',
+      techStack: Array.isArray(techStack) ? techStack : (typeof techStack === 'string' ? techStack.split(',').map(s => s.trim()) : [])
+    };
 
-    await Activity.create({
-      projectId: project._id,
-      userId: req.user._id,
-      action: `Created project "${project.name}"`
-    });
+    if (getDbStatus()) {
+      const project = await Project.create(projectData);
+      await Activity.create({
+        projectId: project._id,
+        userId: req.user._id,
+        action: `Created project "${project.name}"`
+      });
 
-    const populatedProject = await Project.findById(project._id)
-      .populate('ownerId', 'name email')
-      .populate('memberIds', 'name email');
-
-    res.status(201).json({
-      success: true,
-      message: 'Project created successfully',
-      project: {
-        ...populatedProject.toObject(),
-        progress: 0,
-        totalTasks: 0,
-        completedTasks: 0,
-        isOwner: true
-      }
-    });
+      return res.status(201).json({
+        success: true,
+        message: 'Project created successfully',
+        project: {
+          ...project.toObject(),
+          totalTasks: 0,
+          completedTasks: 0,
+          inProgressTasks: 0,
+          progress: 0
+        }
+      });
+    } else {
+      const project = store.createProject(projectData);
+      return res.status(201).json({
+        success: true,
+        message: 'Project created successfully',
+        project: {
+          ...project,
+          totalTasks: 0,
+          completedTasks: 0,
+          inProgressTasks: 0,
+          progress: 0
+        }
+      });
+    }
   } catch (error) {
     next(error);
   }
@@ -198,89 +179,57 @@ const createProject = async (req, res, next) => {
 // @access  Private
 const updateProject = async (req, res, next) => {
   try {
-    const project = await Project.findById(req.params.id);
+    if (getDbStatus()) {
+      let project = await Project.findById(req.params.id);
+      if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
 
-    if (!project) {
-      return res.status(404).json({
-        success: false,
-        message: 'Project not found'
+      Object.assign(project, req.body);
+      await project.save();
+
+      return res.status(200).json({
+        success: true,
+        message: 'Project updated successfully',
+        project
+      });
+    } else {
+      const updated = store.updateProject(req.params.id, req.body);
+      if (!updated) return res.status(404).json({ success: false, message: 'Project not found' });
+      return res.status(200).json({
+        success: true,
+        message: 'Project updated successfully',
+        project: updated
       });
     }
-
-    // Must be owner or member to update
-    const isOwner = project.ownerId.toString() === req.user._id.toString();
-    const isMember = project.memberIds.some(
-      (m) => m.toString() === req.user._id.toString()
-    );
-
-    if (!isOwner && !isMember) {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized to update this project'
-      });
-    }
-
-    const { name, description, startDate, deadline, status } = req.body;
-
-    if (name) project.name = name;
-    if (description !== undefined) project.description = description;
-    if (startDate) project.startDate = startDate;
-    if (deadline !== undefined) project.deadline = deadline;
-    if (status) project.status = status;
-
-    await project.save();
-
-    await Activity.create({
-      projectId: project._id,
-      userId: req.user._id,
-      action: `Updated project details for "${project.name}"`
-    });
-
-    const updated = await Project.findById(project._id)
-      .populate('ownerId', 'name email')
-      .populate('memberIds', 'name email');
-
-    res.status(200).json({
-      success: true,
-      message: 'Project updated successfully',
-      project: updated
-    });
   } catch (error) {
     next(error);
   }
 };
 
-// @desc    Delete project
+// @desc    Delete project & associated tasks
 // @route   DELETE /api/projects/:id
-// @access  Private (Owner only)
+// @access  Private
 const deleteProject = async (req, res, next) => {
   try {
-    const project = await Project.findById(req.params.id);
+    if (getDbStatus()) {
+      const project = await Project.findById(req.params.id);
+      if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
 
-    if (!project) {
-      return res.status(404).json({
-        success: false,
-        message: 'Project not found'
+      await Task.deleteMany({ projectId: project._id });
+      await Activity.deleteMany({ projectId: project._id });
+      await project.deleteOne();
+
+      return res.status(200).json({
+        success: true,
+        message: 'Project and all associated tasks removed successfully'
+      });
+    } else {
+      const deleted = store.deleteProject(req.params.id);
+      if (!deleted) return res.status(404).json({ success: false, message: 'Project not found' });
+      return res.status(200).json({
+        success: true,
+        message: 'Project and all associated tasks removed successfully'
       });
     }
-
-    // Only owner can delete project
-    if (project.ownerId.toString() !== req.user._id.toString()) {
-      return res.status(403).json({
-        success: false,
-        message: 'Only the project owner can delete this project'
-      });
-    }
-
-    // Delete tasks and activities associated with this project
-    await Task.deleteMany({ projectId: project._id });
-    await Activity.deleteMany({ projectId: project._id });
-    await Project.findByIdAndDelete(project._id);
-
-    res.status(200).json({
-      success: true,
-      message: 'Project and all associated tasks removed successfully'
-    });
   } catch (error) {
     next(error);
   }
@@ -288,66 +237,50 @@ const deleteProject = async (req, res, next) => {
 
 // @desc    Add member to project
 // @route   POST /api/projects/:id/members
-// @access  Private (Owner only)
+// @access  Private
 const addMember = async (req, res, next) => {
   try {
-    const project = await Project.findById(req.params.id);
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, message: 'Please provide an email' });
 
-    if (!project) {
-      return res.status(404).json({
-        success: false,
-        message: 'Project not found'
+    if (getDbStatus()) {
+      const userToAdd = await User.findOne({ email: email.toLowerCase() });
+      if (!userToAdd) return res.status(404).json({ success: false, message: 'No registered user found with that email' });
+
+      const project = await Project.findById(req.params.id);
+      if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+
+      if (project.memberIds.includes(userToAdd._id)) {
+        return res.status(400).json({ success: false, message: 'User is already a member of this project' });
+      }
+
+      project.memberIds.push(userToAdd._id);
+      await project.save();
+
+      return res.status(200).json({
+        success: true,
+        message: `${userToAdd.name} added to project`,
+        member: { _id: userToAdd._id, name: userToAdd.name, email: userToAdd.email }
+      });
+    } else {
+      const userToAdd = store.findUserByEmail(email.toLowerCase());
+      if (!userToAdd) return res.status(404).json({ success: false, message: 'No registered user found with that email' });
+
+      const project = store.findProjectById(req.params.id);
+      if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+
+      const memberIds = project.memberIds.map(m => m._id ? m._id.toString() : m.toString());
+      if (memberIds.includes(userToAdd._id.toString())) {
+        return res.status(400).json({ success: false, message: 'User is already a member of this project' });
+      }
+
+      project.memberIds.push({ _id: userToAdd._id, name: userToAdd.name, email: userToAdd.email });
+      return res.status(200).json({
+        success: true,
+        message: `${userToAdd.name} added to project`,
+        member: { _id: userToAdd._id, name: userToAdd.name, email: userToAdd.email }
       });
     }
-
-    if (project.ownerId.toString() !== req.user._id.toString()) {
-      return res.status(403).json({
-        success: false,
-        message: 'Only project owner can manage members'
-      });
-    }
-
-    const { email, userId } = req.body;
-    let userToAdd;
-
-    if (userId) {
-      userToAdd = await User.findById(userId);
-    } else if (email) {
-      userToAdd = await User.findOne({ email: email.toLowerCase() });
-    }
-
-    if (!userToAdd) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found with the provided email or ID'
-      });
-    }
-
-    if (project.memberIds.some((id) => id.toString() === userToAdd._id.toString())) {
-      return res.status(400).json({
-        success: false,
-        message: 'User is already a member of this project'
-      });
-    }
-
-    project.memberIds.push(userToAdd._id);
-    await project.save();
-
-    await Activity.create({
-      projectId: project._id,
-      userId: req.user._id,
-      action: `Added ${userToAdd.name} (${userToAdd.email}) to project`
-    });
-
-    const populated = await Project.findById(project._id)
-      .populate('ownerId', 'name email')
-      .populate('memberIds', 'name email');
-
-    res.status(200).json({
-      success: true,
-      message: `${userToAdd.name} added to the project`,
-      project: populated
-    });
   } catch (error) {
     next(error);
   }
@@ -355,63 +288,30 @@ const addMember = async (req, res, next) => {
 
 // @desc    Remove member from project
 // @route   DELETE /api/projects/:id/members/:userId
-// @access  Private (Owner only)
+// @access  Private
 const removeMember = async (req, res, next) => {
   try {
-    const project = await Project.findById(req.params.id);
+    const { id, userId } = req.params;
 
-    if (!project) {
-      return res.status(404).json({
-        success: false,
-        message: 'Project not found'
-      });
+    if (getDbStatus()) {
+      const project = await Project.findById(id);
+      if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+
+      if (project.ownerId.toString() === userId) {
+        return res.status(400).json({ success: false, message: 'Cannot remove the project owner' });
+      }
+
+      project.memberIds = project.memberIds.filter(m => m.toString() !== userId);
+      await project.save();
+
+      return res.status(200).json({ success: true, message: 'Member removed from project' });
+    } else {
+      const project = store.findProjectById(id);
+      if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+
+      project.memberIds = (project.memberIds || []).filter(m => (m._id ? m._id.toString() : m.toString()) !== userId);
+      return res.status(200).json({ success: true, message: 'Member removed from project' });
     }
-
-    if (project.ownerId.toString() !== req.user._id.toString()) {
-      return res.status(403).json({
-        success: false,
-        message: 'Only project owner can remove members'
-      });
-    }
-
-    const memberIdToRemove = req.params.userId;
-
-    if (project.ownerId.toString() === memberIdToRemove) {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot remove the project owner'
-      });
-    }
-
-    project.memberIds = project.memberIds.filter(
-      (id) => id.toString() !== memberIdToRemove
-    );
-    await project.save();
-
-    // Unassign tasks assigned to this user in this project
-    await Task.updateMany(
-      { projectId: project._id, assignedTo: memberIdToRemove },
-      { $set: { assignedTo: null } }
-    );
-
-    const removedUser = await User.findById(memberIdToRemove);
-    const memberName = removedUser ? removedUser.name : 'A member';
-
-    await Activity.create({
-      projectId: project._id,
-      userId: req.user._id,
-      action: `Removed ${memberName} from project`
-    });
-
-    const populated = await Project.findById(project._id)
-      .populate('ownerId', 'name email')
-      .populate('memberIds', 'name email');
-
-    res.status(200).json({
-      success: true,
-      message: 'Member removed from project',
-      project: populated
-    });
   } catch (error) {
     next(error);
   }
