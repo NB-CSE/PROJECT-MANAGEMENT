@@ -1,5 +1,11 @@
 const mongoose = require('mongoose');
 
+const ChecklistItemSchema = new mongoose.Schema({
+  id: { type: String, default: () => 'chk_' + Date.now() },
+  text: { type: String, required: true },
+  completed: { type: Boolean, default: false }
+}, { _id: false });
+
 const TaskSchema = new mongoose.Schema({
   title: {
     type: String,
@@ -36,6 +42,18 @@ const TaskSchema = new mongoose.Schema({
     type: String,
     enum: ['To Do', 'In Progress', 'Review', 'Completed'],
     default: 'To Do'
+  },
+  tags: {
+    type: [String],
+    default: []
+  },
+  checklist: {
+    type: [ChecklistItemSchema],
+    default: []
+  },
+  estimatedHours: {
+    type: Number,
+    default: 0
   },
   dueDate: {
     type: Date

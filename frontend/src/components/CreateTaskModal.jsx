@@ -2,6 +2,20 @@ import React, { useState, useEffect } from 'react';
 import Modal from './Modal';
 import { useToast } from '../context/ToastContext';
 import api from '../services/api';
+import { Plus, X, Tag, CheckSquare, Clock } from 'lucide-react';
+
+const COMMON_TAGS = [
+  'Frontend',
+  'Backend',
+  'UI/UX',
+  'Feature',
+  'Bug',
+  'Testing',
+  'DevOps',
+  'Database',
+  'Security',
+  'AI/ML'
+];
 
 export default function CreateTaskModal({
   isOpen,
@@ -14,6 +28,9 @@ export default function CreateTaskModal({
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [projectMembers, setProjectMembers] = useState([]);
+  const [subtaskInput, setSubtaskInput] = useState('');
+  const [customTagInput, setCustomTagInput] = useState('');
+
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -21,7 +38,10 @@ export default function CreateTaskModal({
     assignedTo: '',
     priority: 'Medium',
     status: 'To Do',
-    dueDate: ''
+    dueDate: '',
+    estimatedHours: '',
+    tags: [],
+    checklist: []
   });
 
   // Reset or initialize form
@@ -31,10 +51,13 @@ export default function CreateTaskModal({
         title: initialData.title || '',
         description: initialData.description || '',
         projectId: initialData.projectId?._id || initialData.projectId || defaultProjectId || '',
-        assignedTo: initialData.assignedTo?._id || initialData.assignedTo || '',
+        assignedTo: initialData.assignedTo?._id || initialData.assignedTo || initialData.assignedToId?._id || initialData.assignedToId || '',
         priority: initialData.priority || 'Medium',
         status: initialData.status || 'To Do',
-        dueDate: initialData.dueDate ? initialData.dueDate.substring(0, 10) : ''
+        dueDate: initialData.dueDate ? initialData.dueDate.substring(0, 10) : '',
+        estimatedHours: initialData.estimatedHours || '',
+        tags: Array.isArray(initialData.tags) ? [...initialData.tags] : [],
+        checklist: Array.isArray(initialData.checklist) ? [...initialData.checklist] : []
       });
     } else {
       setFormData({
@@ -44,7 +67,10 @@ export default function CreateTaskModal({
         assignedTo: '',
         priority: 'Medium',
         status: 'To Do',
-        dueDate: ''
+        dueDate: '',
+        estimatedHours: '',
+        tags: [],
+        checklist: []
       });
     }
   }, [initialData, defaultProjectId, projects, isOpen]);
@@ -55,7 +81,6 @@ export default function CreateTaskModal({
       const pid = formData.projectId;
       if (!pid) return;
 
-      // Find in projects list if available
       const foundProject = projects.find((p) => p._id === pid);
       if (foundProject && foundProject.memberIds) {
         setProjectMembers(foundProject.memberIds);
@@ -84,6 +109,49 @@ export default function CreateTaskModal({
     fetchMembers();
   }, [formData.projectId, projects]);
 
+  const handleAddSubtask = () => {
+    if (!subtaskInput.trim()) return;
+    const newItem = {
+      id: 'chk_' + Date.now(),
+      text: subtaskInput.trim(),
+      completed: false
+    };
+    setFormData((prev) => ({
+      ...prev,
+      checklist: [...prev.checklist, newItem]
+    }));
+    setSubtaskInput('');
+  };
+
+  const handleRemoveSubtask = (id) => {
+    setFormData((prev) => ({
+      ...prev,
+      checklist: prev.checklist.filter((c) => c.id !== id)
+    }));
+  };
+
+  const toggleTag = (tag) => {
+    setFormData((prev) => {
+      const exists = prev.tags.includes(tag);
+      return {
+        ...prev,
+        tags: exists ? prev.tags.filter((t) => t !== tag) : [...prev.tags, tag]
+      };
+    });
+  };
+
+  const handleAddCustomTag = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (!customTagInput.trim()) return;
+      const tag = customTagInput.trim();
+      if (!formData.tags.includes(tag)) {
+        setFormData((prev) => ({ ...prev, tags: [...prev.tags, tag] }));
+      }
+      setCustomTagInput('');
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.title.trim()) {
@@ -100,7 +168,8 @@ export default function CreateTaskModal({
       const payload = {
         ...formData,
         assignedTo: formData.assignedTo || null,
-        dueDate: formData.dueDate || null
+        dueDate: formData.dueDate || null,
+        estimatedHours: formData.estimatedHours ? Number(formData.estimatedHours) : 0
       };
 
       if (initialData?._id) {
@@ -126,10 +195,11 @@ export default function CreateTaskModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={initialData ? 'Edit Task' : 'Create New Task'}
-      maxWidth="max-w-lg"
+      title={initialData?._id ? 'Edit Task' : 'Create New Task'}
+      maxWidth="max-w-xl"
     >
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4 max-h-[80vh] overflow-y-auto px-1">
+        {/* Title */}
         <div>
           <label className="block text-xs font-bold text-charcoal uppercase tracking-wider mb-1.5">
             Task Title <span className="text-red-500">*</span>
@@ -144,19 +214,21 @@ export default function CreateTaskModal({
           />
         </div>
 
+        {/* Description */}
         <div>
           <label className="block text-xs font-bold text-charcoal uppercase tracking-wider mb-1.5">
             Description
           </label>
           <textarea
-            rows={3}
+            rows={2}
             placeholder="Add specific details, acceptance criteria, or links..."
             value={formData.description}
             onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-            className="w-full px-3.5 py-2.5 rounded-xl border border-border bg-white text-charcoal text-sm focus:outline-none focus:ring-2 focus:ring-lime focus:border-transparent transition-all placeholder:text-charcoal-300 resize-none"
+            className="w-full px-3.5 py-2 rounded-xl border border-border bg-white text-charcoal text-sm focus:outline-none focus:ring-2 focus:ring-lime focus:border-transparent transition-all placeholder:text-charcoal-300 resize-none"
           />
         </div>
 
+        {/* Project & Assignee */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-bold text-charcoal uppercase tracking-wider mb-1.5">
@@ -196,7 +268,8 @@ export default function CreateTaskModal({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {/* Priority, Status, Due Date */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label className="block text-xs font-bold text-charcoal uppercase tracking-wider mb-1.5">
               Priority
@@ -242,6 +315,111 @@ export default function CreateTaskModal({
           </div>
         </div>
 
+        {/* Estimated Hours */}
+        <div>
+          <label className="block text-xs font-bold text-charcoal uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+            <Clock size={13} />
+            <span>Estimated Effort (Hours)</span>
+          </label>
+          <input
+            type="number"
+            min="0"
+            max="200"
+            placeholder="e.g. 8"
+            value={formData.estimatedHours}
+            onChange={(e) => setFormData({ ...formData, estimatedHours: e.target.value })}
+            className="w-full px-3 py-2 rounded-xl border border-border bg-white text-charcoal text-sm focus:outline-none focus:ring-2 focus:ring-lime focus:border-transparent transition-all placeholder:text-charcoal-300"
+          />
+        </div>
+
+        {/* Tags Selection */}
+        <div>
+          <label className="block text-xs font-bold text-charcoal uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+            <Tag size={13} />
+            <span>Tags & Labels</span>
+          </label>
+          <div className="flex items-center gap-1.5 flex-wrap mb-2">
+            {COMMON_TAGS.map((tag) => {
+              const selected = formData.tags.includes(tag);
+              return (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => toggleTag(tag)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all border ${
+                    selected
+                      ? 'bg-lime text-charcoal border-lime-dark/40 shadow-2xs'
+                      : 'bg-surface-subtle text-charcoal-500 border-border hover:border-charcoal-300'
+                  }`}
+                >
+                  {tag}
+                </button>
+              );
+            })}
+          </div>
+          <input
+            type="text"
+            placeholder="Type custom tag and press Enter..."
+            value={customTagInput}
+            onChange={(e) => setCustomTagInput(e.target.value)}
+            onKeyDown={handleAddCustomTag}
+            className="w-full px-3 py-1.5 rounded-lg border border-border bg-white text-charcoal text-xs focus:outline-none focus:ring-2 focus:ring-lime placeholder:text-charcoal-300"
+          />
+        </div>
+
+        {/* Checklist Subtasks Builder */}
+        <div>
+          <label className="block text-xs font-bold text-charcoal uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+            <CheckSquare size={13} />
+            <span>Checklist / Subtasks</span>
+          </label>
+
+          <div className="flex items-center gap-2 mb-2">
+            <input
+              type="text"
+              placeholder="Add a checklist item..."
+              value={subtaskInput}
+              onChange={(e) => setSubtaskInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAddSubtask();
+                }
+              }}
+              className="flex-1 px-3 py-1.5 rounded-xl border border-border bg-white text-charcoal text-xs focus:outline-none focus:ring-2 focus:ring-lime placeholder:text-charcoal-300"
+            />
+            <button
+              type="button"
+              onClick={handleAddSubtask}
+              className="px-3 py-1.5 rounded-xl bg-charcoal text-white text-xs font-bold hover:bg-charcoal-800 transition-colors flex items-center gap-1"
+            >
+              <Plus size={13} />
+              <span>Add</span>
+            </button>
+          </div>
+
+          {formData.checklist.length > 0 && (
+            <div className="space-y-1.5 max-h-32 overflow-y-auto p-2 rounded-xl bg-surface-subtle border border-border">
+              {formData.checklist.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between gap-2 p-1.5 rounded-lg bg-white border border-border text-xs"
+                >
+                  <span className="font-semibold text-charcoal truncate">{item.text}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveSubtask(item.id)}
+                    className="p-1 text-charcoal-400 hover:text-red-500 rounded transition-colors"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
         <div className="flex items-center justify-end gap-3 pt-4 border-t border-border">
           <button
             type="button"
@@ -253,9 +431,9 @@ export default function CreateTaskModal({
           <button
             type="submit"
             disabled={loading}
-            className="px-5 py-2.5 rounded-xl text-sm font-bold bg-lime hover:bg-lime-hover text-charcoal transition-all shadow-subtle disabled:opacity-50"
+            className="px-5 py-2.5 rounded-xl bg-lime hover:bg-lime-hover text-charcoal font-black text-sm transition-all shadow-subtle disabled:opacity-50"
           >
-            {loading ? 'Saving...' : initialData ? 'Update Task' : 'Create Task'}
+            {loading ? 'Saving...' : initialData?._id ? 'Update Task' : 'Create Task'}
           </button>
         </div>
       </form>

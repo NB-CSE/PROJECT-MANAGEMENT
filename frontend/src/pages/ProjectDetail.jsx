@@ -5,6 +5,7 @@ import { useToast } from '../context/ToastContext';
 import KanbanBoard from '../components/KanbanBoard';
 import ProgressBar from '../components/ProgressBar';
 import CreateTaskModal from '../components/CreateTaskModal';
+import TaskDetailModal from '../components/TaskDetailModal';
 import CreateProjectModal from '../components/CreateProjectModal';
 import AssignMemberModal from '../components/AssignMemberModal';
 import ConfirmModal from '../components/ConfirmModal';
@@ -20,7 +21,9 @@ import {
   Clock,
   Layers,
   LayoutGrid,
-  List
+  List,
+  Tag,
+  Briefcase
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -38,6 +41,8 @@ export default function ProjectDetail() {
   // Modals
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
+  const [viewingTask, setViewingTask] = useState(null);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [isEditProjectOpen, setIsEditProjectOpen] = useState(false);
   const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -89,6 +94,11 @@ export default function ProjectDetail() {
       toast.error('Failed to update task status');
       fetchProjectData();
     }
+  };
+
+  const handleViewDetails = (task) => {
+    setViewingTask(task);
+    setIsDetailModalOpen(true);
   };
 
   const handleDeleteTask = (task) => {
@@ -152,10 +162,21 @@ export default function ProjectDetail() {
       <div className="p-6 sm:p-8 rounded-3xl bg-white border border-border shadow-card space-y-6">
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
           <div className="space-y-2 max-w-2xl">
-            <div className="flex items-center gap-2.5 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className={`px-2.5 py-1 rounded-full text-xs border ${statusColors[project.status] || statusColors.Active}`}>
                 {project.status}
               </span>
+              {project.category && (
+                <span className="px-2 py-0.5 rounded-lg text-xs font-semibold bg-surface-muted text-charcoal border border-border">
+                  {project.category}
+                </span>
+              )}
+              {project.client && (
+                <span className="text-xs font-medium text-charcoal-400 flex items-center gap-1">
+                  <Briefcase size={12} />
+                  <span>{project.client}</span>
+                </span>
+              )}
               <span className="text-xs font-semibold text-charcoal-400">
                 Created {format(new Date(project.createdAt), 'MMM d, yyyy')}
               </span>
@@ -186,30 +207,29 @@ export default function ProjectDetail() {
               <Edit size={15} />
               <span className="hidden sm:inline">Edit</span>
             </button>
-            {project.isOwner && (
-              <button
-                onClick={() => setIsDeleteModalOpen(true)}
-                className="p-2.5 rounded-xl border border-red-200 hover:bg-red-50 text-red-600 text-xs font-bold transition-all shadow-subtle flex items-center gap-1.5"
-                title="Delete Project"
-              >
-                <Trash2 size={15} />
-                <span className="hidden sm:inline">Delete</span>
-              </button>
-            )}
+            <button
+              onClick={() => setIsDeleteModalOpen(true)}
+              className="p-2.5 rounded-xl border border-red-200 hover:bg-red-50 text-red-600 text-xs font-bold transition-all shadow-subtle flex items-center gap-1.5"
+              title="Delete Project"
+            >
+              <Trash2 size={15} />
+              <span className="hidden sm:inline">Delete</span>
+            </button>
           </div>
         </div>
 
         {/* Project Metrics & Timeline Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t border-border">
           <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-charcoal-400">Progress</span>
-            <div className="mt-1">
-              <ProgressBar value={project.progress || 0} size="sm" />
+            <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-charcoal-400 mb-1">
+              <span>Progress</span>
+              <span className="text-charcoal font-black">{project.progress || 0}%</span>
             </div>
+            <ProgressBar value={project.progress || 0} size="sm" />
           </div>
 
           <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-charcoal-400">Timeline</span>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-charcoal-400">Timeline Deadline</span>
             <div className="flex items-center gap-1.5 mt-1 text-xs font-bold text-charcoal">
               <Calendar size={14} className="text-charcoal-400" />
               <span>
@@ -221,16 +241,16 @@ export default function ProjectDetail() {
           </div>
 
           <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-charcoal-400">Tasks</span>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-charcoal-400">Task Completion</span>
             <div className="flex items-center gap-2 mt-1 text-xs font-bold text-charcoal">
-              <span>{project.completedTasks} completed</span>
+              <span className="text-lime-dark font-black">{project.completedTasks} completed</span>
               <span className="text-charcoal-300">/</span>
               <span>{project.totalTasks} total</span>
             </div>
           </div>
 
           <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-charcoal-400">Team</span>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-charcoal-400">Project Team</span>
             <div className="flex items-center -space-x-1.5 mt-1">
               {project.memberIds?.slice(0, 4).map((m) => (
                 <div
@@ -298,6 +318,7 @@ export default function ProjectDetail() {
         <KanbanBoard
           tasks={tasks}
           onStatusChange={handleStatusChange}
+          onViewDetails={handleViewDetails}
           onEditTask={(task) => {
             setEditingTask(task);
             setIsTaskModalOpen(true);
@@ -317,6 +338,7 @@ export default function ProjectDetail() {
                   <th className="py-3 px-4">Task</th>
                   <th className="py-3 px-4">Priority</th>
                   <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4">Checklist</th>
                   <th className="py-3 px-4">Assignee</th>
                   <th className="py-3 px-4">Due Date</th>
                   <th className="py-3 px-4 text-right">Actions</th>
@@ -324,7 +346,11 @@ export default function ProjectDetail() {
               </thead>
               <tbody className="divide-y divide-border">
                 {tasks.map((task) => (
-                  <tr key={task._id} className="hover:bg-surface-muted/50 transition-colors">
+                  <tr
+                    key={task._id}
+                    onClick={() => handleViewDetails(task)}
+                    className="hover:bg-surface-muted/50 transition-colors cursor-pointer"
+                  >
                     <td className="py-3 px-4 font-bold text-charcoal">{task.title}</td>
                     <td className="py-3 px-4">
                       <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-surface-muted border border-border">
@@ -332,16 +358,14 @@ export default function ProjectDetail() {
                       </span>
                     </td>
                     <td className="py-3 px-4">
-                      <select
-                        value={task.status}
-                        onChange={(e) => handleStatusChange(task._id, e.target.value)}
-                        className="text-xs font-bold py-1 px-2 rounded-lg bg-surface-muted border border-border text-charcoal focus:outline-none"
-                      >
-                        <option value="To Do">To Do</option>
-                        <option value="In Progress">In Progress</option>
-                        <option value="Review">Review</option>
-                        <option value="Completed">Completed</option>
-                      </select>
+                      <span className="text-xs font-bold py-1 px-2 rounded-lg bg-lime/20 text-charcoal border border-lime-dark/30">
+                        {task.status}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-charcoal-500 font-semibold">
+                      {task.checklist && task.checklist.length > 0
+                        ? `${task.checklist.filter((c) => c.completed).length}/${task.checklist.length}`
+                        : '—'}
                     </td>
                     <td className="py-3 px-4 text-charcoal-500">
                       {task.assignedTo?.name || 'Unassigned'}
@@ -352,7 +376,8 @@ export default function ProjectDetail() {
                     <td className="py-3 px-4 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation();
                             setEditingTask(task);
                             setIsTaskModalOpen(true);
                           }}
@@ -361,7 +386,10 @@ export default function ProjectDetail() {
                           <Edit size={14} />
                         </button>
                         <button
-                          onClick={() => handleDeleteTask(task)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteTask(task);
+                          }}
                           className="p-1 text-charcoal-400 hover:text-red-600"
                         >
                           <Trash2 size={14} />
@@ -372,7 +400,7 @@ export default function ProjectDetail() {
                 ))}
                 {tasks.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="py-8 text-center text-charcoal-400">
+                    <td colSpan={7} className="py-8 text-center text-charcoal-400">
                       No tasks created for this project yet.
                     </td>
                   </tr>
@@ -384,10 +412,32 @@ export default function ProjectDetail() {
       )}
 
       {/* Project Activity Log Section */}
-      <div className="p-6 rounded-2xl bg-white border border-border shadow-card mt-8">
-        <h3 className="text-sm font-bold text-charcoal mb-4">Project Activity</h3>
+      <div className="p-6 rounded-3xl bg-white border border-border shadow-card mt-8">
+        <h3 className="text-sm font-bold text-charcoal mb-4">Project Activity Timeline</h3>
         <ActivityFeed activities={activities} />
       </div>
+
+      {/* Task Detail Modal */}
+      {viewingTask && (
+        <TaskDetailModal
+          isOpen={isDetailModalOpen}
+          onClose={() => {
+            setIsDetailModalOpen(false);
+            setViewingTask(null);
+          }}
+          task={viewingTask}
+          onEdit={(t) => {
+            setEditingTask(t);
+            setIsTaskModalOpen(true);
+          }}
+          onDelete={handleDeleteTask}
+          onTaskUpdated={(updated) => {
+            setViewingTask(updated);
+            setTasks((prev) => prev.map((t) => (t._id === updated._id ? updated : t)));
+            fetchProjectData();
+          }}
+        />
+      )}
 
       {/* Modals */}
       <CreateTaskModal

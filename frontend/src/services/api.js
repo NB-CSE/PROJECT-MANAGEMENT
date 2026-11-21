@@ -64,12 +64,17 @@ const handleMockRequest = (endpoint, options = {}) => {
       let list = clientStore.getEnrichedProjects();
       const status = urlParams.get('status');
       const search = urlParams.get('search');
+      const category = urlParams.get('category');
+
       if (status && status !== 'All') {
         list = list.filter((p) => p.status === status);
       }
+      if (category && category !== 'All') {
+        list = list.filter((p) => p.category === category);
+      }
       if (search) {
         const q = search.toLowerCase();
-        list = list.filter((p) => p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q));
+        list = list.filter((p) => p.name.toLowerCase().includes(q) || (p.description && p.description.toLowerCase().includes(q)));
       }
       return { success: true, count: list.length, projects: list };
     }
@@ -103,12 +108,41 @@ const handleMockRequest = (endpoint, options = {}) => {
       let list = clientStore.getTasks();
       const projectId = urlParams.get('projectId');
       const status = urlParams.get('status');
-      if (projectId) {
+      const priority = urlParams.get('priority');
+      const search = urlParams.get('search');
+      const tag = urlParams.get('tag');
+      const overdue = urlParams.get('overdue');
+      const assignedTo = urlParams.get('assignedTo');
+
+      if (projectId && projectId !== 'All') {
         list = list.filter((t) => (t.projectId?._id || t.projectId) === projectId);
       }
-      if (status) {
+      if (status && status !== 'All') {
         list = list.filter((t) => t.status === status);
       }
+      if (priority && priority !== 'All') {
+        list = list.filter((t) => t.priority === priority);
+      }
+      if (tag && tag !== 'All') {
+        list = list.filter((t) => (t.tags || []).includes(tag));
+      }
+      if (search) {
+        const q = search.toLowerCase();
+        list = list.filter((t) => t.title.toLowerCase().includes(q) || (t.description && t.description.toLowerCase().includes(q)));
+      }
+      if (overdue === 'true') {
+        list = list.filter((t) => t.status !== 'Completed' && t.dueDate && new Date(t.dueDate) < new Date());
+      }
+      if (assignedTo && assignedTo !== 'All') {
+        if (assignedTo === 'unassigned') {
+          list = list.filter((t) => !t.assignedTo && !t.assignedToId);
+        } else if (assignedTo === 'me') {
+          list = list.filter((t) => (t.assignedTo?._id || t.assignedTo) === 'user_alex');
+        } else {
+          list = list.filter((t) => (t.assignedTo?._id || t.assignedTo) === assignedTo);
+        }
+      }
+
       return { success: true, count: list.length, tasks: list };
     }
     if (method === 'POST') {
@@ -121,7 +155,12 @@ const handleMockRequest = (endpoint, options = {}) => {
     const parts = cleanEndpoint.replace(/^\/?tasks\//, '').split('/');
     const id = parts[0];
     const subAction = parts[1];
+    const subId = parts[2];
 
+    if (subAction === 'checklist' && subId && (method === 'POST' || method === 'PATCH')) {
+      const updated = clientStore.toggleChecklistItem(id, subId);
+      return { success: true, task: updated };
+    }
     if (subAction === 'status' && (method === 'PATCH' || method === 'PUT')) {
       const updated = clientStore.updateTaskStatus(id, body.status);
       return { success: true, task: updated };
@@ -138,12 +177,22 @@ const handleMockRequest = (endpoint, options = {}) => {
 
   // 5. Users
   if (cleanEndpoint === '/users' || cleanEndpoint === 'users') {
+    if (method === 'POST') {
+      const newUser = clientStore.addMember(body);
+      return { success: true, user: newUser, message: 'Member added successfully' };
+    }
     return { success: true, users: clientStore.getUsers() };
   }
 
   // 6. Activities
   if (cleanEndpoint === '/activities' || cleanEndpoint === 'activities') {
     return { success: true, activities: clientStore.getActivities() };
+  }
+
+  // 7. Workspace Reset
+  if (cleanEndpoint === '/workspace/reset' || cleanEndpoint === 'workspace/reset') {
+    clientStore.resetToDefault();
+    return { success: true, message: 'Workspace reset to default sample data' };
   }
 
   return { success: true, data: {} };

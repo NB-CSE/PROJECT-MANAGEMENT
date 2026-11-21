@@ -13,8 +13,19 @@ import {
   Filter,
   CheckCircle2,
   Clock,
-  Archive
+  Layers,
+  Sparkles,
+  ArrowUpDown,
+  RotateCcw
 } from 'lucide-react';
+
+const CATEGORIES = [
+  'All',
+  'Full-Stack Web App',
+  'AI & HealthTech',
+  'E-Commerce Platform',
+  'Frontend Engineering'
+];
 
 export default function Projects() {
   const { openProjectModal } = useOutletContext();
@@ -23,6 +34,8 @@ export default function Projects() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [categoryFilter, setCategoryFilter] = useState('All');
+  const [sortBy, setSortBy] = useState('name'); // 'name', 'progress', 'deadline', 'priority'
 
   // Modals state
   const [editingProject, setEditingProject] = useState(null);
@@ -38,6 +51,7 @@ export default function Projects() {
       const params = new URLSearchParams();
       if (searchTerm) params.append('search', searchTerm);
       if (statusFilter && statusFilter !== 'All') params.append('status', statusFilter);
+      if (categoryFilter && categoryFilter !== 'All') params.append('category', categoryFilter);
 
       const res = await api.get(`/projects?${params.toString()}`);
       if (res.success) {
@@ -53,9 +67,9 @@ export default function Projects() {
   useEffect(() => {
     const timer = setTimeout(() => {
       fetchProjects();
-    }, 250);
+    }, 200);
     return () => clearTimeout(timer);
-  }, [searchTerm, statusFilter]);
+  }, [searchTerm, statusFilter, categoryFilter]);
 
   useEffect(() => {
     const handleUpdate = () => fetchProjects();
@@ -90,16 +104,51 @@ export default function Projects() {
     }
   };
 
+  // Sort projects based on selected criteria
+  const sortedProjects = [...projects].sort((a, b) => {
+    if (sortBy === 'progress') {
+      return (b.progress || 0) - (a.progress || 0);
+    }
+    if (sortBy === 'deadline') {
+      if (!a.deadline) return 1;
+      if (!b.deadline) return -1;
+      return new Date(a.deadline) - new Date(b.deadline);
+    }
+    if (sortBy === 'priority') {
+      const pMap = { Urgent: 4, High: 3, Medium: 2, Low: 1 };
+      return (pMap[b.priority] || 0) - (pMap[a.priority] || 0);
+    }
+    return a.name.localeCompare(b.name);
+  });
+
   const filterOptions = ['All', 'Active', 'Planning', 'On Hold', 'Completed'];
+
+  const resetFilters = () => {
+    setSearchTerm('');
+    setStatusFilter('All');
+    setCategoryFilter('All');
+    setSortBy('name');
+  };
+
+  const hasFilters = searchTerm || statusFilter !== 'All' || categoryFilter !== 'All';
+
+  // Stats calculation
+  const totalCount = projects.length;
+  const activeCount = projects.filter((p) => p.status === 'Active').length;
+  const completedCount = projects.filter((p) => p.status === 'Completed').length;
+  const avgProgress =
+    totalCount > 0
+      ? Math.round(projects.reduce((acc, p) => acc + (p.progress || 0), 0) / totalCount)
+      : 0;
 
   return (
     <div className="space-y-6">
       {/* Top Header & Actions */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-black text-charcoal tracking-tight">Projects</h1>
+          <h1 className="text-2xl font-black text-charcoal tracking-tight">Project Workspaces</h1>
           <p className="text-xs text-charcoal-400 mt-1">
-            Organize, monitor, and deliver key company milestones
+            Organize roadmaps, timelines, resource allocation, and project deliverables
           </p>
         </div>
 
@@ -112,22 +161,83 @@ export default function Projects() {
         </button>
       </div>
 
+      {/* KPI Ribbon */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="p-4 rounded-2xl bg-white border border-border shadow-xs">
+          <span className="text-[10px] font-bold text-charcoal-400 uppercase tracking-wider">Total Initiatives</span>
+          <div className="text-xl font-black text-charcoal mt-1">{totalCount}</div>
+        </div>
+        <div className="p-4 rounded-2xl bg-white border border-border shadow-xs">
+          <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider">Active Sprints</span>
+          <div className="text-xl font-black text-amber-800 mt-1">{activeCount}</div>
+        </div>
+        <div className="p-4 rounded-2xl bg-white border border-border shadow-xs">
+          <span className="text-[10px] font-bold text-lime-dark uppercase tracking-wider">Completed</span>
+          <div className="text-xl font-black text-charcoal mt-1">{completedCount}</div>
+        </div>
+        <div className="p-4 rounded-2xl bg-white border border-border shadow-xs">
+          <span className="text-[10px] font-bold text-charcoal-400 uppercase tracking-wider">Average Progress</span>
+          <div className="text-xl font-black text-charcoal mt-1">{avgProgress}%</div>
+        </div>
+      </div>
+
       {/* Filter and Search Bar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 p-4 rounded-2xl bg-white border border-border shadow-xs">
-        {/* Search */}
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3.5 top-2.5 text-charcoal-300" size={17} />
-          <input
-            type="text"
-            placeholder="Search projects by name..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 rounded-xl border border-border bg-surface-subtle text-charcoal text-xs focus:outline-none focus:ring-2 focus:ring-lime focus:border-transparent transition-all placeholder:text-charcoal-400"
-          />
+      <div className="p-4 rounded-2xl bg-white border border-border shadow-xs space-y-3">
+        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+          {/* Search */}
+          <div className="relative flex-1">
+            <Search className="absolute left-3.5 top-2.5 text-charcoal-300" size={17} />
+            <input
+              type="text"
+              placeholder="Search projects by name, client, or description..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 rounded-xl border border-border bg-surface-subtle text-charcoal text-xs focus:outline-none focus:ring-2 focus:ring-lime focus:border-transparent transition-all placeholder:text-charcoal-400"
+            />
+          </div>
+
+          {/* Category Dropdown */}
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="py-2 px-3 rounded-xl border border-border bg-surface-subtle text-charcoal text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-lime"
+          >
+            <option value="All">All Categories</option>
+            {CATEGORIES.filter((c) => c !== 'All').map((cat) => (
+              <option key={cat} value={cat}>
+                {cat}
+              </option>
+            ))}
+          </select>
+
+          {/* Sort Dropdown */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <ArrowUpDown size={14} className="text-charcoal-400" />
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="py-2 px-3 rounded-xl border border-border bg-surface-subtle text-charcoal text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-lime"
+            >
+              <option value="name">Sort by: Name (A-Z)</option>
+              <option value="progress">Sort by: Progress (% high)</option>
+              <option value="deadline">Sort by: Deadline (Earliest)</option>
+              <option value="priority">Sort by: Priority (Urgent)</option>
+            </select>
+          </div>
+
+          {hasFilters && (
+            <button
+              onClick={resetFilters}
+              className="p-2 text-charcoal-400 hover:text-charcoal hover:bg-surface-muted rounded-xl transition-colors shrink-0"
+              title="Reset Filters"
+            >
+              <RotateCcw size={15} />
+            </button>
+          )}
         </div>
 
         {/* Status Filter Tabs */}
-        <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0">
+        <div className="flex items-center gap-1 overflow-x-auto pt-1 border-t border-border">
           {filterOptions.map((opt) => (
             <button
               key={opt}
@@ -151,9 +261,9 @@ export default function Projects() {
             <div key={i} className="h-56 bg-charcoal-100 rounded-2xl" />
           ))}
         </div>
-      ) : projects.length > 0 ? (
+      ) : sortedProjects.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {projects.map((project) => (
+          {sortedProjects.map((project) => (
             <ProjectCard
               key={project._id}
               project={project}
@@ -168,8 +278,8 @@ export default function Projects() {
           <FolderKanban size={40} className="mx-auto text-charcoal-300 mb-3" />
           <h3 className="text-base font-bold text-charcoal">No projects found</h3>
           <p className="text-xs text-charcoal-400 mt-1 max-w-sm mx-auto">
-            {searchTerm || statusFilter !== 'All'
-              ? 'Try modifying your search query or status filter.'
+            {searchTerm || statusFilter !== 'All' || categoryFilter !== 'All'
+              ? 'Try modifying your search query or filters.'
               : 'Create your first project to start managing tasks with your team.'}
           </p>
           {!searchTerm && statusFilter === 'All' && (

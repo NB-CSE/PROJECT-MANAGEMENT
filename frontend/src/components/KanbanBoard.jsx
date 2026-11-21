@@ -15,6 +15,7 @@ export default function KanbanBoard({
   onEditTask,
   onDeleteTask,
   onQuickAddTask,
+  onViewDetails,
   showProject = false
 }) {
   const [dragOverColumn, setDragOverColumn] = useState(null);
@@ -70,6 +71,7 @@ export default function KanbanBoard({
               </div>
               {onQuickAddTask && (
                 <button
+                  type="button"
                   onClick={() => onQuickAddTask(column.id)}
                   className="p-1 rounded-lg text-charcoal-400 hover:text-charcoal hover:bg-white transition-colors"
                   title={`Add task to ${column.title}`}
@@ -88,6 +90,7 @@ export default function KanbanBoard({
                   onEdit={onEditTask}
                   onDelete={onDeleteTask}
                   onStatusChange={onStatusChange}
+                  onViewDetails={onViewDetails}
                   showProject={showProject}
                 />
               ))}
