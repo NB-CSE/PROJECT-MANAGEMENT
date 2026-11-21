@@ -464,7 +464,7 @@ class InMemoryStore {
   }
 
   // Projects
-  findProjectsForUser(userId, { search, status }) {
+  findProjectsForUser(userId, { search, status } = {}) {
     let result = this.projects.filter(
       (p) =>
         p.ownerId.toString() === userId.toString() ||
@@ -507,6 +507,10 @@ class InMemoryStore {
         };
       })
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  }
+
+  findProjectsByUser(userId, options = {}) {
+    return this.findProjectsForUser(userId, options);
   }
 
   findProjectById(id) {

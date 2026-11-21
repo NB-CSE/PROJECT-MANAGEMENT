@@ -72,7 +72,7 @@ const getDashboardData = async (req, res, next) => {
       });
     } else {
       const stats = store.getDashboardStats(userId);
-      const userProjects = store.findProjectsByUser(userId);
+      const userProjects = store.findProjectsForUser ? store.findProjectsForUser(userId, {}) : store.findProjectsByUser(userId);
       const recentActivities = store.getActivities(userId, 10);
 
       const totalTasks = (stats.taskStatusCounts['To Do'] || 0) +
