@@ -572,11 +572,10 @@ export default function Dashboard() {
                         </p>
                       </div>
                       <div
-                        className={`text-[11px] font-bold px-2 py-0.5 rounded-lg whitespace-nowrap shrink-0 ${
-                          isTaskOverdue
+                        className={`text-[11px] font-bold px-2 py-0.5 rounded-lg whitespace-nowrap shrink-0 ${isTaskOverdue
                             ? 'bg-red-50 text-red-600 border border-red-200'
                             : 'bg-charcoal-100 text-charcoal-600'
-                        }`}
+                          }`}
                       >
                         {format(new Date(task.dueDate), 'MMM d')}
                       </div>

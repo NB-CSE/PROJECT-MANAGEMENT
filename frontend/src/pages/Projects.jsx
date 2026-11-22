@@ -242,11 +242,10 @@ export default function Projects() {
             <button
               key={opt}
               onClick={() => setStatusFilter(opt)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 ${
-                statusFilter === opt
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 ${statusFilter === opt
                   ? 'bg-charcoal text-white shadow-2xs'
                   : 'text-charcoal-400 hover:text-charcoal hover:bg-surface-muted'
-              }`}
+                }`}
             >
               {opt}
             </button>
